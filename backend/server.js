@@ -80,7 +80,8 @@ app.get('/', (req, res) => {
     firebase: 'connected',
     endpoints: {
       'GET /health': 'Health check',
-      'POST /send-message': 'Send message notification'
+      'POST /send-message': 'Send message notification',
+      'POST /send-call': 'Send call notification'
     }
   });
 });
@@ -130,6 +131,48 @@ app.post('/send-message', async (req, res) => {
   } catch (error) {
     console.error('Error sending message notification:', error);
     res.status(500).json({ error: 'Failed to send message notification', details: error.message });
+  }
+});
+
+app.post('/send-call', async (req, res) => {
+  try {
+    const { token, caller_name, call_type, call_id, timestamp } = req.body;
+
+    if (!token || !caller_name || !call_type || !call_id) {
+      return res.status(400).json({ error: 'Token, caller_name, call_type, and call_id are required' });
+    }
+
+    const callData = {
+      type: 'call',
+      caller_name: caller_name,
+      call_type: call_type,
+      call_id: call_id,
+      timestamp: timestamp || Date.now().toString()
+    };
+
+    const message = {
+      token: token,
+      notification: {
+        title: caller_name,
+        body: `Incoming ${call_type} call`
+      },
+      data: callData,
+      android: {
+        notification: {
+          channelId: 'call_channel',
+          priority: 'max',
+          defaultSound: false,
+          color: '#25D366',
+          icon: 'ic_call'
+        }
+      }
+    };
+
+    const response = await sendFCMNotification(token, caller_name, `Incoming ${call_type} call`, callData);
+    res.json({ success: true, messageId: response.message_id, message: 'Call notification sent successfully' });
+  } catch (error) {
+    console.error('Error sending call notification:', error);
+    res.status(500).json({ error: 'Failed to send call notification', details: error.message });
   }
 });
 

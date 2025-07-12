@@ -43,27 +43,43 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
 
   const checkInitialNotification = async () => {
     try {
-      // Check if app was opened from a notification
       const initialNotification = await NotificationModule.getInitialNotification();
       if (initialNotification) {
         console.log('App opened from notification:', initialNotification);
         
-        // Create notification object
-        const notification: NotificationData = {
-          id: Date.now(),
-          title: initialNotification.sender || initialNotification.title || 'New Message',
-          body: initialNotification.message || initialNotification.body || 'You have a new message',
-          data: initialNotification,
-          timestamp: initialNotification.timestamp || new Date().toISOString(),
-        };
-        
-        // Add to notifications list
-        addNotification(notification);
-        
-        // Navigate to notification detail
-        setTimeout(() => {
-          navigation.navigate('NotificationDetail', { notification });
-        }, 500);
+        const action = initialNotification.action;
+        if (action === 'call_accepted' || action === 'call_rejected') {
+          const callResult = {
+            id: Date.now(),
+            title: `Call ${action === 'call_accepted' ? 'Accepted' : 'Rejected'}`,
+            body: `${action === 'call_accepted' ? 'You accepted' : 'You rejected'} a call from ${initialNotification.caller_name}`,
+            data: initialNotification,
+            timestamp: new Date().toISOString(),
+          };
+          addNotification(callResult);
+          
+          setTimeout(() => {
+            navigation.navigate('CallResult', { 
+              action: action,
+              callerName: initialNotification.caller_name,
+              callId: initialNotification.call_id,
+              callType: initialNotification.call_type
+            });
+          }, 500);
+        } else {
+          const notification: NotificationData = {
+            id: Date.now(),
+            title: initialNotification.sender || initialNotification.title || 'New Message',
+            body: initialNotification.message || initialNotification.body || 'You have a new message',
+            data: initialNotification,
+            timestamp: initialNotification.timestamp || new Date().toISOString(),
+          };
+          addNotification(notification);
+          
+          setTimeout(() => {
+            navigation.navigate('NotificationDetail', { notification });
+          }, 500);
+        }
       }
     } catch (error) {
       console.error('Error checking initial notification:', error);
@@ -119,18 +135,28 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
   const setupNotificationListeners = () => {
     const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
       console.log('Foreground message received:', remoteMessage);
-      const notification = createNotificationFromRemoteMessage(remoteMessage);
       
-      addNotification(notification);
-      
-      Alert.alert(
-        notification.title,
-        notification.body,
-        [
-          { text: 'Dismiss', style: 'cancel' },
-          { text: 'View', onPress: () => navigation.navigate('NotificationDetail', { notification }) },
-        ]
-      );
+      const type = remoteMessage.data?.type;
+      if (type === 'call' && remoteMessage.data) {
+        const callData = remoteMessage.data;
+        navigation.navigate('IncomingCall', {
+          callerName: callData.caller_name || 'Unknown',
+          callType: callData.call_type || 'voice',
+          callId: callData.call_id || 'unknown',
+        });
+      } else {
+        const notification = createNotificationFromRemoteMessage(remoteMessage);
+        addNotification(notification);
+        
+        Alert.alert(
+          notification.title,
+          notification.body,
+          [
+            { text: 'Dismiss', style: 'cancel' },
+            { text: 'View', onPress: () => navigation.navigate('NotificationDetail', { notification }) },
+          ]
+        );
+      }
     });
 
     const unsubscribeOpened = messaging().onNotificationOpenedApp(remoteMessage => {
@@ -173,6 +199,18 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
       );
     } catch (error) {
       console.error('Error sending test notification:', error);
+    }
+  };
+
+  const sendTestCallNotification = async () => {
+    try {
+      await NotificationModule.showCallNotification(
+        'John Doe',
+        'voice',
+        'test_call_' + Date.now()
+      );
+    } catch (error) {
+      console.error('Error sending test call notification:', error);
     }
   };
 
@@ -220,6 +258,40 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
     }
   };
 
+  const simulateBackendCall = async () => {
+    try {
+      if (!fcmToken) {
+        Alert.alert('Error', 'FCM token not available');
+        return;
+      }
+
+      const response = await fetch('http://10.0.2.2:3000/send-call', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: fcmToken,
+          caller_name: 'John Doe',
+          call_type: 'voice',
+          call_id: `call_${Date.now()}`,
+          timestamp: Date.now().toString()
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        Alert.alert('Success', 'Backend call sent successfully!');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to send call');
+      }
+    } catch (error) {
+      console.error('Error calling backend:', error);
+      Alert.alert('Error', 'Failed to connect to backend. Make sure server is running on port 3000');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView}>
@@ -239,6 +311,12 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
           <Text style={styles.sectionTitle}>Actions</Text>
           <TouchableOpacity style={styles.button} onPress={sendTestNotification}>
             <Text style={styles.buttonText}>Send Test Notification</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={sendTestCallNotification}>
+            <Text style={styles.buttonText}>Send Test Call</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.callButton} onPress={simulateBackendCall}>
+            <Text style={styles.buttonText}>📞 Simulate Backend Call</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.button} onPress={clearAllNotifications}>
             <Text style={styles.buttonText}>Clear All Notifications</Text>
@@ -274,6 +352,93 @@ const HomeScreen = ({ navigation }: { navigation: any }) => {
           )}
         </View>
       </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const IncomingCallScreen = ({ route, navigation }: { route: any, navigation: any }) => {
+  const { callerName, callType, callId } = route.params;
+  const [isCallActive, setIsCallActive] = useState(true);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (isCallActive) {
+        handleReject();
+      }
+    }, 30000);
+
+    return () => clearTimeout(timeout);
+  }, [isCallActive]);
+
+  const handleAccept = () => {
+    setIsCallActive(false);
+    navigation.navigate('CallResult', {
+      action: 'call_accepted',
+      callerName,
+      callId,
+      callType
+    });
+  };
+
+  const handleReject = () => {
+    setIsCallActive(false);
+    navigation.navigate('CallResult', {
+      action: 'call_rejected',
+      callerName,
+      callId,
+      callType
+    });
+  };
+
+  return (
+    <SafeAreaView style={styles.callScreen}>
+      <View style={styles.callContainer}>
+        <View style={styles.callerInfo}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{callerName.charAt(0).toUpperCase()}</Text>
+          </View>
+          <Text style={styles.callerName}>{callerName}</Text>
+          <Text style={styles.callTypeText}>Incoming {callType} call</Text>
+        </View>
+        
+        <View style={styles.callActions}>
+          <TouchableOpacity style={styles.rejectButton} onPress={handleReject}>
+            <Text style={styles.actionButtonText}>✕</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.acceptButton} onPress={handleAccept}>
+            <Text style={styles.actionButtonText}>✓</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const CallResultScreen = ({ route, navigation }: { route: any, navigation: any }) => {
+  const { action, callerName, callId, callType } = route.params;
+  const isAccepted = action === 'call_accepted';
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.callResultContainer}>
+        <View style={styles.callResultIcon}>
+          <Text style={styles.callResultIconText}>{isAccepted ? '✓' : '✕'}</Text>
+        </View>
+        <Text style={styles.callResultTitle}>
+          Call {isAccepted ? 'Accepted' : 'Rejected'}
+        </Text>
+        <Text style={styles.callResultDetails}>
+          {isAccepted ? 'You accepted' : 'You rejected'} a {callType} call from {callerName}
+        </Text>
+        <Text style={styles.callResultId}>Call ID: {callId}</Text>
+        
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.navigate('Home')}
+        >
+          <Text style={styles.backButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
@@ -363,6 +528,16 @@ const App = () => {
           options={{ title: 'Notifications' }}
         />
         <Stack.Screen 
+          name="IncomingCall" 
+          component={IncomingCallScreen} 
+          options={{ title: 'Incoming Call', headerShown: false }}
+        />
+        <Stack.Screen 
+          name="CallResult" 
+          component={CallResultScreen} 
+          options={{ title: 'Call Result' }}
+        />
+        <Stack.Screen 
           name="NotificationDetail" 
           component={NotificationDetailScreen} 
           options={{ title: 'Notification Details' }}
@@ -443,7 +618,129 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
+  callButton: {
+    backgroundColor: '#075E54',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   buttonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  callScreen: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  callContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 50,
+  },
+  callerInfo: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#25D366',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  avatarText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  callerName: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 10,
+  },
+  callTypeText: {
+    fontSize: 18,
+    color: 'white',
+  },
+  callActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    paddingHorizontal: 50,
+  },
+  acceptButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rejectButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F44336',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionButtonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  callResultContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  callResultIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#25D366',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  callResultIconText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  callResultTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  callResultDetails: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  callResultId: {
+    fontSize: 14,
+    color: '#999',
+    marginBottom: 30,
+  },
+  backButton: {
+    backgroundColor: '#25D366',
+    padding: 15,
+    borderRadius: 8,
+    minWidth: 150,
+    alignItems: 'center',
+  },
+  backButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',

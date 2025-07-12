@@ -2,11 +2,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Add permissions for push notifications -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
       android:name=".MainApplication"
@@ -29,7 +30,19 @@
         </intent-filter>
       </activity>
       
-      <!-- Firebase Messaging Service -->
+      <activity
+        android:name=".CallNotificationActivity"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:launchMode="singleTask"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
+        android:exported="false" />
+      
+      <receiver
+        android:name=".CallActionReceiver"
+        android:enabled="true"
+        android:exported="false" />
+      
       <service android:name=".MyFirebaseMessagingService" 
                android:exported="false">
         <intent-filter>
@@ -37,18 +50,19 @@
         </intent-filter>
       </service>
       
-      <!-- Default notification channel ID for Firebase -->
+      <service android:name=".CallRingtoneService"
+               android:enabled="true"
+               android:exported="false" />
+      
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_channel_id"
         android:value="high_importance_channel"
         tools:replace="android:value" />
       
-      <!-- Default notification icon for Firebase -->
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_icon"
         android:resource="@mipmap/ic_launcher" />
         
-      <!-- Default notification color for Firebase -->
       <meta-data
         android:name="com.google.firebase.messaging.default_notification_color"
         android:resource="@color/colorAccent"
