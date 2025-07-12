@@ -6,4 +6,7 @@
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
+    <!-- WhatsApp green color -->
+    <color name="colorAccent">#25D366</color>
+
 </resources>
